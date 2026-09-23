@@ -19,11 +19,9 @@
         input[type="text"] { width: 100%; box-sizing: border-box; font-size: 16px; padding: 12px; background: #2d2d2d; color: #fff; border: 1px solid #555; border-radius: 6px; font-family: monospace; outline: none; transition: 0.2s; letter-spacing: 1px; }
         input[type="text"]:focus { border-color: #00ffcc; box-shadow: 0 0 8px rgba(0, 255, 204, 0.3); }
         
-        /* Стили главной кнопки */
         button.update-btn { width: 100%; font-size: 16px; padding: 12px; background: #007acc; color: white; border: none; border-radius: 6px; cursor: pointer; font-weight: bold; transition: 0.2s; margin-bottom: 10px; }
         button.update-btn:hover { background: #005f9e; }
         
-        /* Стили новой кнопки очистки */
         button.clear-btn { width: 100%; font-size: 15px; padding: 10px; background: #2a1a1a; color: #ff5555; border: 1px solid #ff5555; border-radius: 6px; cursor: pointer; font-weight: bold; transition: 0.2s; margin-bottom: 15px; }
         button.clear-btn:hover { background: #4a1a1a; color: #ffaaaa; }
 
@@ -50,7 +48,7 @@
 </head>
 <body>
     <h2>Симулятор векторных полей</h2>
-    <p>Кликните в любую точку, чтобы построить траекторию. Колесико мыши — масштаб.</p>
+    <p>Нажмите для траектории. Движение двумя пальцами или колесико — масштаб.</p>
 
     <div class="main-container">
         <div class="sidebar">
@@ -102,7 +100,7 @@
         const inputEq = document.getElementById('eqInput');
         const errorMsg = document.getElementById('errorMsg');
         const updateBtn = document.getElementById('updateBtn');
-        const clearBtn = document.getElementById('clearBtn'); // Получаем новую кнопку
+        const clearBtn = document.getElementById('clearBtn'); 
         
         const savedEquation = localStorage.getItem('saved_ode_equation');
         if (savedEquation !== null) {
@@ -352,17 +350,93 @@
             ctx.fill();
         }
 
+        // --- УЛУЧШЕННАЯ СИСТЕМА УПРАВЛЕНИЯ КАСАНИЯМИ ДЛЯ МОБИЛОК И ПК ---
+        let activePointers = [];
+        let lastPinchDistance = null;
+        let isPinching = false;
+        let pointerDownPos = null;
+        let hasPinchedOrDragged = false;
+
         canvas.addEventListener('pointerdown', function(e) {
-            e.preventDefault(); 
-            const rect = canvas.getBoundingClientRect();
-            const scaleX = canvas.width / rect.width;
-            const scaleY = canvas.height / rect.height;
-            const px = (e.clientX - rect.left) * scaleX;
-            const py = (e.clientY - rect.top) * scaleY;
-            
-            drawTrajectory(toMathX(px), toMathY(py), true);
+            e.preventDefault();
+            activePointers.push(e);
+
+            if (activePointers.length === 1) {
+                // Если коснулись одним пальцем, запоминаем позицию
+                pointerDownPos = { x: e.clientX, y: e.clientY };
+                hasPinchedOrDragged = false;
+            } else if (activePointers.length === 2) {
+                // Если коснулись двумя пальцами, активируем режим Зума
+                isPinching = true;
+                hasPinchedOrDragged = true;
+                lastPinchDistance = Math.hypot(
+                    activePointers[0].clientX - activePointers[1].clientX,
+                    activePointers[0].clientY - activePointers[1].clientY
+                );
+            }
         });
 
+        canvas.addEventListener('pointermove', function(e) {
+            e.preventDefault();
+            
+            // Обновляем данные текущего пальца/мыши в массиве
+            const index = activePointers.findIndex(p => p.pointerId === e.pointerId);
+            if (index !== -1) {
+                activePointers[index] = e;
+            }
+
+            if (isPinching && activePointers.length === 2) {
+                // Рассчитываем новую дистанцию между двумя пальцами
+                const currentDistance = Math.hypot(
+                    activePointers[0].clientX - activePointers[1].clientX,
+                    activePointers[0].clientY - activePointers[1].clientY
+                );
+                
+                const zoomFactor = currentDistance / lastPinchDistance;
+                scale *= zoomFactor;
+                scale = Math.max(5, Math.min(scale, 500)); // Задаем лимиты зума
+                lastPinchDistance = currentDistance;
+                redrawAll();
+                
+            } else if (activePointers.length === 1 && pointerDownPos) {
+                // Если палец сдвинулся слишком сильно (например, свайп или попытка скролла),
+                // мы отменяем рисование траектории
+                const moveDist = Math.hypot(e.clientX - pointerDownPos.x, e.clientY - pointerDownPos.y);
+                if (moveDist > 10) {
+                    hasPinchedOrDragged = true;
+                }
+            }
+        });
+
+        function handlePointerUp(e) {
+            e.preventDefault();
+            const index = activePointers.findIndex(p => p.pointerId === e.pointerId);
+            if (index !== -1) {
+                activePointers.splice(index, 1);
+            }
+
+            if (activePointers.length < 2) {
+                isPinching = false;
+            }
+
+            // Отрисовываем траекторию ТОЛЬКО если это был чистый клик/тап (без зума и свайпа)
+            if (activePointers.length === 0 && !hasPinchedOrDragged && pointerDownPos) {
+                const rect = canvas.getBoundingClientRect();
+                const scaleX = canvas.width / rect.width;
+                const scaleY = canvas.height / rect.height;
+                const px = (pointerDownPos.x - rect.left) * scaleX;
+                const py = (pointerDownPos.y - rect.top) * scaleY;
+                
+                drawTrajectory(toMathX(px), toMathY(py), true);
+            }
+        }
+
+        canvas.addEventListener('pointerup', handlePointerUp);
+        canvas.addEventListener('pointercancel', handlePointerUp);
+        canvas.addEventListener('pointerout', handlePointerUp);
+        canvas.addEventListener('pointerleave', handlePointerUp);
+
+        // Сохраняем зум колесиком мыши для компьютеров
         canvas.addEventListener('wheel', function(e) {
             e.preventDefault();
             const zoomFactor = 0.1;
@@ -378,10 +452,9 @@
 
         updateBtn.addEventListener('click', compileEquation);
         
-        // Логика новой кнопки очистки кривых
         clearBtn.addEventListener('click', () => {
-            drawnTrajectories = []; // Обнуляем массив с точками
-            redrawAll(); // Перерисовываем холст без них
+            drawnTrajectories = []; 
+            redrawAll(); 
         });
 
         inputEq.addEventListener('keypress', e => { 
