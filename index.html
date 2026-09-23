@@ -2,7 +2,6 @@
 <html lang="ru">
 <head>
     <meta charset="UTF-8">
-    <!-- Критически важный тег для мобильных устройств -->
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>Универсальный симулятор ОДУ</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/mathjs/11.8.0/math.js"></script>
@@ -13,7 +12,6 @@
         
         .main-container { display: flex; gap: 20px; max-width: 1200px; width: 100%; justify-content: center; align-items: flex-start; }
         
-        /* Панель управления */
         .sidebar { background: #1e1e1e; padding: 20px; border-radius: 12px; border: 1px solid #333; box-shadow: 0 8px 20px rgba(0,0,0,0.5); width: 360px; flex-shrink: 0; box-sizing: border-box; }
         
         .input-group { margin-bottom: 15px; }
@@ -25,7 +23,6 @@
         button.update-btn:hover { background: #005f9e; }
         .error { color: #ff5555; font-size: 13px; display: none; margin-bottom: 15px; background: #331a1a; padding: 8px; border-radius: 4px; border: 1px solid #ff5555; }
 
-        /* Клавиатура */
         .keyboard-title { font-size: 13px; color: #888; text-transform: uppercase; margin-bottom: 10px; letter-spacing: 1px; }
         .keyboard { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; }
         .key { background: #333; border: 1px solid #444; color: #fff; padding: 10px 0; border-radius: 4px; cursor: pointer; font-family: monospace; font-size: 15px; transition: 0.1s; font-weight: bold; text-align: center; user-select: none; -webkit-tap-highlight-color: transparent;}
@@ -33,12 +30,12 @@
         .key:active { background: #555; }
         .key.wide { grid-column: span 2; }
         .key.accent { background: #2a3a4a; border-color: #4a6a8a; }
+        .key.danger { background: #4a2a2a; border-color: #8a4a4a; color: #ff8888; }
+        .key.danger:hover { background: #5a3a3a; color: #ffaaaa; }
 
-        /* Холст */
         .canvas-wrapper { width: 100%; max-width: 800px; display: flex; justify-content: center; }
-        canvas { background: #1a1a1a; border: 2px solid #333; border-radius: 8px; cursor: crosshair; box-shadow: 0 8px 20px rgba(0,0,0,0.5); max-width: 100%; height: auto; touch-action: none; /* Запрещает скролл страницы при рисовании на мобильных */ }
+        canvas { background: #1a1a1a; border: 2px solid #333; border-radius: 8px; cursor: crosshair; box-shadow: 0 8px 20px rgba(0,0,0,0.5); max-width: 100%; height: auto; touch-action: none; }
 
-        /* Адаптивность для мобильных экранов */
         @media (max-width: 900px) {
             .main-container { flex-direction: column; align-items: center; gap: 15px; }
             .sidebar { width: 100%; max-width: 500px; padding: 15px; }
@@ -47,7 +44,7 @@
 </head>
 <body>
     <h2>Симулятор векторных полей</h2>
-    <p>Кликните (или коснитесь) в любую точку на графике, чтобы бросить «лодку» в поток</p>
+    <p>Кликните (или коснитесь) в любую точку на графике</p>
 
     <div class="main-container">
         <div class="sidebar">
@@ -61,10 +58,11 @@
 
             <div class="keyboard-title">Быстрый ввод</div>
             <div class="keyboard" id="keyboard">
+                <!-- Обновленная первая строка кнопок -->
                 <button class="key accent">y'</button>
-                <button class="key accent">dy/dx</button>
                 <button class="key accent">dx</button>
                 <button class="key accent">dy</button>
+                <button class="key danger">⌫</button>
                 
                 <button class="key">x</button>
                 <button class="key">y</button>
@@ -99,6 +97,18 @@
         const errorMsg = document.getElementById('errorMsg');
         const updateBtn = document.getElementById('updateBtn');
         
+        // 1. Восстановление при загрузке
+        const savedEquation = localStorage.getItem('saved_ode_equation');
+        if (savedEquation !== null) {
+            inputEq.value = savedEquation;
+        }
+
+        // 2. Моментальное сохранение при вводе с физической клавиатуры
+        inputEq.addEventListener('input', () => {
+            localStorage.setItem('saved_ode_equation', inputEq.value);
+        });
+
+        // 3. Моментальное сохранение при вводе с виртуальной клавиатуры + логика Backspace
         document.querySelectorAll('.key').forEach(btn => {
             btn.addEventListener('click', (e) => {
                 e.preventDefault();
@@ -107,11 +117,26 @@
                 const end = inputEq.selectionEnd;
                 const text = inputEq.value;
                 
-                inputEq.value = text.slice(0, start) + val + text.slice(end);
+                if (val === '⌫') {
+                    if (start !== end) {
+                        // Удаление выделенного текста
+                        inputEq.value = text.slice(0, start) + text.slice(end);
+                        inputEq.setSelectionRange(start, start);
+                    } else if (start > 0) {
+                        // Удаление одного символа перед курсором
+                        inputEq.value = text.slice(0, start - 1) + text.slice(end);
+                        inputEq.setSelectionRange(start - 1, start - 1);
+                    }
+                } else {
+                    // Обычная вставка символа/функции
+                    inputEq.value = text.slice(0, start) + val + text.slice(end);
+                    const offset = val.endsWith('()') ? val.length - 1 : val.length;
+                    inputEq.setSelectionRange(start + offset, start + offset);
+                }
                 
-                const offset = val.endsWith('()') ? val.length - 1 : val.length;
+                // Сохраняем состояние и возвращаем фокус
+                localStorage.setItem('saved_ode_equation', inputEq.value);
                 inputEq.focus();
-                inputEq.setSelectionRange(start + offset, start + offset);
             });
         });
 
@@ -128,6 +153,8 @@
             if (!str) return;
 
             try {
+                localStorage.setItem('saved_ode_equation', inputEq.value);
+
                 str = str.replace(/x\s*y/g, 'x*y').replace(/y\s*x/g, 'y*x');
                 str = str.replace(/(\d)\s*(sin|cos|tan|cot|exp|ln|sqrt|\()/g, '$1*$2');
                 str = str.replace(/([xy])\s*(sin|cos|tan|cot|exp|ln|sqrt|\()/g, '$1*$2');
@@ -265,16 +292,13 @@
             ctx.fill();
         }
 
-        // Обновленный обработчик кликов и касаний для мобильных устройств
         canvas.addEventListener('pointerdown', function(e) {
-            e.preventDefault(); // Блокируем поведение браузера (например, скролл при рисовании)
+            e.preventDefault(); 
             
             const rect = canvas.getBoundingClientRect();
-            // Высчитываем коэффициент масштабирования (если CSS сжал Canvas)
             const scaleX = canvas.width / rect.width;
             const scaleY = canvas.height / rect.height;
             
-            // Находим точные координаты с учетом CSS-сжатия
             const px = (e.clientX - rect.left) * scaleX;
             const py = (e.clientY - rect.top) * scaleY;
             
@@ -284,7 +308,7 @@
         updateBtn.addEventListener('click', compileEquation);
         inputEq.addEventListener('keypress', e => { 
             if (e.key === 'Enter') {
-                e.preventDefault(); // Скрываем мобильную клавиатуру
+                e.preventDefault();
                 inputEq.blur(); 
                 compileEquation(); 
             }
