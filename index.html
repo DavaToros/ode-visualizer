@@ -19,8 +19,14 @@
         input[type="text"] { width: 100%; box-sizing: border-box; font-size: 16px; padding: 12px; background: #2d2d2d; color: #fff; border: 1px solid #555; border-radius: 6px; font-family: monospace; outline: none; transition: 0.2s; letter-spacing: 1px; }
         input[type="text"]:focus { border-color: #00ffcc; box-shadow: 0 0 8px rgba(0, 255, 204, 0.3); }
         
-        button.update-btn { width: 100%; font-size: 16px; padding: 12px; background: #007acc; color: white; border: none; border-radius: 6px; cursor: pointer; font-weight: bold; transition: 0.2s; margin-bottom: 15px; }
+        /* Стили главной кнопки */
+        button.update-btn { width: 100%; font-size: 16px; padding: 12px; background: #007acc; color: white; border: none; border-radius: 6px; cursor: pointer; font-weight: bold; transition: 0.2s; margin-bottom: 10px; }
         button.update-btn:hover { background: #005f9e; }
+        
+        /* Стили новой кнопки очистки */
+        button.clear-btn { width: 100%; font-size: 15px; padding: 10px; background: #2a1a1a; color: #ff5555; border: 1px solid #ff5555; border-radius: 6px; cursor: pointer; font-weight: bold; transition: 0.2s; margin-bottom: 15px; }
+        button.clear-btn:hover { background: #4a1a1a; color: #ffaaaa; }
+
         .error { color: #ff5555; font-size: 13px; display: none; margin-bottom: 15px; background: #331a1a; padding: 8px; border-radius: 4px; border: 1px solid #ff5555; }
 
         .keyboard-title { font-size: 13px; color: #888; text-transform: uppercase; margin-bottom: 10px; letter-spacing: 1px; }
@@ -44,7 +50,7 @@
 </head>
 <body>
     <h2>Симулятор векторных полей</h2>
-    <p>Кликните (или коснитесь) в любую точку на графике</p>
+    <p>Кликните в любую точку, чтобы построить траекторию. Колесико мыши — масштаб.</p>
 
     <div class="main-container">
         <div class="sidebar">
@@ -54,11 +60,11 @@
             </div>
             
             <button class="update-btn" id="updateBtn">Скомпилировать поле</button>
+            <button class="clear-btn" id="clearBtn">Очистить траектории</button>
             <div id="errorMsg" class="error">Ошибка синтаксиса. Проверьте формулу.</div>
 
             <div class="keyboard-title">Быстрый ввод</div>
             <div class="keyboard" id="keyboard">
-                <!-- Обновленная первая строка кнопок -->
                 <button class="key accent">y'</button>
                 <button class="key accent">dx</button>
                 <button class="key accent">dy</button>
@@ -96,19 +102,17 @@
         const inputEq = document.getElementById('eqInput');
         const errorMsg = document.getElementById('errorMsg');
         const updateBtn = document.getElementById('updateBtn');
+        const clearBtn = document.getElementById('clearBtn'); // Получаем новую кнопку
         
-        // 1. Восстановление при загрузке
         const savedEquation = localStorage.getItem('saved_ode_equation');
         if (savedEquation !== null) {
             inputEq.value = savedEquation;
         }
 
-        // 2. Моментальное сохранение при вводе с физической клавиатуры
         inputEq.addEventListener('input', () => {
             localStorage.setItem('saved_ode_equation', inputEq.value);
         });
 
-        // 3. Моментальное сохранение при вводе с виртуальной клавиатуры + логика Backspace
         document.querySelectorAll('.key').forEach(btn => {
             btn.addEventListener('click', (e) => {
                 e.preventDefault();
@@ -119,22 +123,18 @@
                 
                 if (val === '⌫') {
                     if (start !== end) {
-                        // Удаление выделенного текста
                         inputEq.value = text.slice(0, start) + text.slice(end);
                         inputEq.setSelectionRange(start, start);
                     } else if (start > 0) {
-                        // Удаление одного символа перед курсором
                         inputEq.value = text.slice(0, start - 1) + text.slice(end);
                         inputEq.setSelectionRange(start - 1, start - 1);
                     }
                 } else {
-                    // Обычная вставка символа/функции
                     inputEq.value = text.slice(0, start) + val + text.slice(end);
                     const offset = val.endsWith('()') ? val.length - 1 : val.length;
                     inputEq.setSelectionRange(start + offset, start + offset);
                 }
                 
-                // Сохраняем состояние и возвращаем фокус
                 localStorage.setItem('saved_ode_equation', inputEq.value);
                 inputEq.focus();
             });
@@ -142,11 +142,12 @@
 
         const width = canvas.width;
         const height = canvas.height;
-        const scale = 50; 
+        let scale = 50; 
         const originX = width / 2;
         const originY = height / 2;
 
         let getVectorFunc = null;
+        let drawnTrajectories = []; 
 
         function compileEquation() {
             let str = inputEq.value.trim();
@@ -190,7 +191,8 @@
                 };
 
                 errorMsg.style.display = 'none';
-                drawVectorField();
+                drawnTrajectories = []; 
+                redrawAll();
             } catch (err) {
                 errorMsg.style.display = 'block';
             }
@@ -209,26 +211,78 @@
         function toScreenX(x) { return x * scale + originX; }
         function toScreenY(y) { return -y * scale + originY; }
 
-        function drawVectorField() {
+        function redrawAll() {
             ctx.clearRect(0, 0, width, height);
-            
+            drawGridAndAxes();
+            drawVectorField();
+            drawnTrajectories.forEach(pt => drawTrajectory(pt.x, pt.y, false));
+        }
+
+        function drawGridAndAxes() {
             ctx.strokeStyle = 'rgba(255,255,255,0.05)';
             ctx.lineWidth = 1;
-            for(let i = 0; i < width; i += scale) { ctx.beginPath(); ctx.moveTo(i, 0); ctx.lineTo(i, height); ctx.stroke(); }
-            for(let i = 0; i < height; i += scale) { ctx.beginPath(); ctx.moveTo(0, i); ctx.lineTo(width, i); ctx.stroke(); }
+            const pxStep = 50; 
             
-            ctx.strokeStyle = 'rgba(255,255,255,0.2)';
+            for(let i = originX % pxStep; i < width; i += pxStep) { ctx.beginPath(); ctx.moveTo(i, 0); ctx.lineTo(i, height); ctx.stroke(); }
+            for(let i = originY % pxStep; i < height; i += pxStep) { ctx.beginPath(); ctx.moveTo(0, i); ctx.lineTo(width, i); ctx.stroke(); }
+            
+            ctx.strokeStyle = 'rgba(255, 255, 255, 0.4)';
+            ctx.lineWidth = 2;
             ctx.beginPath();
             ctx.moveTo(0, originY); ctx.lineTo(width, originY);
             ctx.moveTo(originX, 0); ctx.lineTo(originX, height);
             ctx.stroke();
 
+            ctx.shadowColor = 'rgba(0, 0, 0, 0.9)';
+            ctx.shadowBlur = 4;
+
+            ctx.fillStyle = '#ffcc00'; 
+            ctx.font = '13px "Segoe UI", Tahoma, sans-serif';
+            
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'top';
+            for(let px = originX % pxStep; px < width; px += pxStep) {
+                let mathX = toMathX(px);
+                if (Math.abs(mathX) < 0.001) continue; 
+                
+                ctx.beginPath(); 
+                ctx.moveTo(px, originY - 4); 
+                ctx.lineTo(px, originY + 4); 
+                ctx.stroke();
+                
+                ctx.fillText(parseFloat(mathX.toFixed(2)), px, originY + 8);
+            }
+            
+            ctx.textAlign = 'left';
+            ctx.textBaseline = 'middle';
+            for(let py = originY % pxStep; py < height; py += pxStep) {
+                let mathY = toMathY(py);
+                if (Math.abs(mathY) < 0.001) continue; 
+                
+                ctx.beginPath(); 
+                ctx.moveTo(originX - 4, py); 
+                ctx.lineTo(originX + 4, py); 
+                ctx.stroke();
+                
+                ctx.fillText(parseFloat(mathY.toFixed(2)), originX + 8, py);
+            }
+
+            ctx.fillStyle = '#ffffff';
+            ctx.font = 'italic bold 18px serif';
+            ctx.fillText("x", width - 20, originY - 20);
+            ctx.fillText("y", originX + 15, 15);
+
+            ctx.shadowBlur = 0;
+        }
+
+        function drawVectorField() {
             ctx.strokeStyle = 'rgba(0, 255, 204, 0.4)';
             ctx.lineWidth = 1.5;
             const length = 12;
+            const step = 25; 
 
-            for (let px = 25; px < width; px += 25) {
-                for (let py = 25; py < height; py += 25) {
+            for (let px = step/2; px < width; px += step) {
+                for (let py = step/2; py < height; py += step) {
                     let x = toMathX(px);
                     let y = toMathY(py);
                     let v = getNormalizedVector(x, y);
@@ -259,19 +313,25 @@
             };
         }
 
-        function drawTrajectory(startX, startY) {
+        function drawTrajectory(startX, startY, save = true) {
             if (!getVectorFunc) return;
+            
+            if (save) {
+                drawnTrajectories.push({x: startX, y: startY});
+            }
+
             ctx.strokeStyle = '#ff3366';
             ctx.lineWidth = 2.5;
-            const h = 0.05; 
-            const steps = 600; 
+            
+            const h = 2.5 / scale; 
+            const steps = 800; 
             
             ctx.beginPath();
             ctx.moveTo(toScreenX(startX), toScreenY(startY));
             let curr = {x: startX, y: startY};
             for (let i = 0; i < steps; i++) {
                 curr = rk4Step(curr.x, curr.y, h);
-                if (Math.abs(curr.x) > 100 || Math.abs(curr.y) > 100) break; 
+                if (Math.abs(curr.x) > width/scale * 2 || Math.abs(curr.y) > height/scale * 2) break; 
                 ctx.lineTo(toScreenX(curr.x), toScreenY(curr.y));
             }
             ctx.stroke();
@@ -281,7 +341,7 @@
             curr = {x: startX, y: startY};
             for (let i = 0; i < steps; i++) {
                 curr = rk4Step(curr.x, curr.y, -h);
-                if (Math.abs(curr.x) > 100 || Math.abs(curr.y) > 100) break;
+                if (Math.abs(curr.x) > width/scale * 2 || Math.abs(curr.y) > height/scale * 2) break;
                 ctx.lineTo(toScreenX(curr.x), toScreenY(curr.y));
             }
             ctx.stroke();
@@ -294,18 +354,36 @@
 
         canvas.addEventListener('pointerdown', function(e) {
             e.preventDefault(); 
-            
             const rect = canvas.getBoundingClientRect();
             const scaleX = canvas.width / rect.width;
             const scaleY = canvas.height / rect.height;
-            
             const px = (e.clientX - rect.left) * scaleX;
             const py = (e.clientY - rect.top) * scaleY;
             
-            drawTrajectory(toMathX(px), toMathY(py));
+            drawTrajectory(toMathX(px), toMathY(py), true);
+        });
+
+        canvas.addEventListener('wheel', function(e) {
+            e.preventDefault();
+            const zoomFactor = 0.1;
+            if (e.deltaY < 0) {
+                scale *= (1 + zoomFactor); 
+            } else {
+                scale /= (1 + zoomFactor); 
+            }
+            
+            scale = Math.max(5, Math.min(scale, 500));
+            redrawAll();
         });
 
         updateBtn.addEventListener('click', compileEquation);
+        
+        // Логика новой кнопки очистки кривых
+        clearBtn.addEventListener('click', () => {
+            drawnTrajectories = []; // Обнуляем массив с точками
+            redrawAll(); // Перерисовываем холст без них
+        });
+
         inputEq.addEventListener('keypress', e => { 
             if (e.key === 'Enter') {
                 e.preventDefault();
