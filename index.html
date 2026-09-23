@@ -1,0 +1,323 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <title>Универсальный симулятор ОДУ</title>
+    <!-- Подключаем библиотеку math.js -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/mathjs/11.8.0/math.js"></script>
+    <style>
+        body { font-family: 'Segoe UI', Tahoma, Verdana, sans-serif; background: #121212; color: #e0e0e0; margin: 0; display: flex; flex-direction: column; align-items: center; height: 100vh; overflow: hidden; }
+        h2 { margin: 15px 0 5px 0; color: #fff; text-align: center; }
+        p { color: #aaa; margin: 0 0 15px 0; font-size: 14px; text-align: center; }
+        
+        .main-container { display: flex; gap: 20px; max-width: 1200px; width: 100%; justify-content: center; align-items: flex-start; }
+        
+        /* Панель управления */
+        .sidebar { background: #1e1e1e; padding: 20px; border-radius: 12px; border: 1px solid #333; box-shadow: 0 8px 20px rgba(0,0,0,0.5); width: 360px; }
+        
+        .input-group { margin-bottom: 15px; }
+        .input-group label { display: block; margin-bottom: 8px; font-weight: bold; color: #00ffcc; font-size: 14px;}
+        input[type="text"] { width: 100%; box-sizing: border-box; font-size: 18px; padding: 12px; background: #2d2d2d; color: #fff; border: 1px solid #555; border-radius: 6px; font-family: monospace; outline: none; transition: 0.2s; letter-spacing: 1px; }
+        input[type="text"]:focus { border-color: #00ffcc; box-shadow: 0 0 8px rgba(0, 255, 204, 0.3); }
+        
+        button.update-btn { width: 100%; font-size: 16px; padding: 12px; background: #007acc; color: white; border: none; border-radius: 6px; cursor: pointer; font-weight: bold; transition: 0.2s; margin-bottom: 15px; }
+        button.update-btn:hover { background: #005f9e; }
+        .error { color: #ff5555; font-size: 13px; display: none; margin-bottom: 15px; background: #331a1a; padding: 8px; border-radius: 4px; border: 1px solid #ff5555; }
+
+        /* Клавиатура */
+        .keyboard-title { font-size: 13px; color: #888; text-transform: uppercase; margin-bottom: 10px; letter-spacing: 1px; }
+        .keyboard { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; }
+        .key { background: #333; border: 1px solid #444; color: #fff; padding: 10px 0; border-radius: 4px; cursor: pointer; font-family: monospace; font-size: 15px; transition: 0.1s; font-weight: bold;}
+        .key:hover { background: #4a4a4a; border-color: #00ffcc; color: #00ffcc; }
+        .key:active { background: #555; }
+        .key.wide { grid-column: span 2; }
+        .key.accent { background: #2a3a4a; border-color: #4a6a8a; }
+
+        /* Холст */
+        canvas { background: #1a1a1a; border: 2px solid #333; border-radius: 8px; cursor: crosshair; box-shadow: 0 8px 20px rgba(0,0,0,0.5); }
+    </style>
+</head>
+<body>
+    <h2>Симулятор векторных полей (Универсальный парсер)</h2>
+    <p>Кликните в любую точку на графике, чтобы бросить «лодку» в поток</p>
+
+    <div class="main-container">
+        <div class="sidebar">
+            <div class="input-group">
+                <label for="eqInput">Введите дифференциальное уравнение:</label>
+                <input type="text" id="eqInput" value="(2x + y + 1)dx - (4x + 2y - 3)dy = 0" autocomplete="off" placeholder="Например: y' = y - x">
+            </div>
+            
+            <button class="update-btn" id="updateBtn">Скомпилировать поле</button>
+            <div id="errorMsg" class="error">Ошибка синтаксиса. Проверьте формулу.</div>
+
+            <div class="keyboard-title">Быстрый ввод</div>
+            <div class="keyboard" id="keyboard">
+                <button class="key accent">y'</button>
+                <button class="key accent">dy/dx</button>
+                <button class="key accent">dx</button>
+                <button class="key accent">dy</button>
+                
+                <button class="key">x</button>
+                <button class="key">y</button>
+                <button class="key">=</button>
+                <button class="key">^</button>
+                
+                <button class="key">+</button>
+                <button class="key">-</button>
+                <button class="key">*</button>
+                <button class="key">/</button>
+                
+                <button class="key">(</button>
+                <button class="key">)</button>
+                <button class="key">sin()</button>
+                <button class="key">cos()</button>
+                
+                <button class="key">exp()</button>
+                <button class="key">ln()</button>
+                <button class="key wide">sqrt()</button>
+            </div>
+        </div>
+
+        <canvas id="odeCanvas" width="800" height="600"></canvas>
+    </div>
+
+    <script>
+        const canvas = document.getElementById('odeCanvas');
+        const ctx = canvas.getContext('2d');
+        const inputEq = document.getElementById('eqInput');
+        const errorMsg = document.getElementById('errorMsg');
+        const updateBtn = document.getElementById('updateBtn');
+        
+        // Настройка виртуальной клавиатуры
+        document.querySelectorAll('.key').forEach(btn => {
+            btn.addEventListener('click', () => {
+                const val = btn.innerText;
+                const start = inputEq.selectionStart;
+                const end = inputEq.selectionEnd;
+                const text = inputEq.value;
+                
+                inputEq.value = text.slice(0, start) + val + text.slice(end);
+                
+                const offset = val.endsWith('()') ? val.length - 1 : val.length;
+                inputEq.focus();
+                inputEq.setSelectionRange(start + offset, start + offset);
+            });
+        });
+
+        // Настройки координат
+        const width = canvas.width;
+        const height = canvas.height;
+        const scale = 50; 
+        const originX = width / 2;
+        const originY = height / 2;
+
+        let getVectorFunc = null;
+
+        /**
+         * УМНЫЙ ПАРСЕР ОДУ
+         * Преобразует любую запись в параметрический вектор (vx, vy)
+         */
+        function compileEquation() {
+            let str = inputEq.value.trim();
+            if (!str) return;
+
+            try {
+                // 1. Замена ln на стандартный log
+                str = str.replace(/ln\(/g, 'log(');
+                
+                // 2. Унификация всех производных в переменную 'yp'
+                str = str.replace(/y'/g, 'yp').replace(/dy\s*\/\s*dx/g, 'yp');
+                
+                // 3. Добавление знака умножения перед dx и dy (2xdx -> 2x * dx)
+                str = str.replace(/([0-9a-zA-Z\)])\s*(dx|dy)/g, '$1 * $2');
+                
+                // 4. Превращаем уравнение A = B в выражение A - (B) = 0
+                if (str.includes('=')) {
+                    let parts = str.split('=');
+                    str = parts[0] + ' - (' + parts.slice(1).join('=') + ')';
+                }
+
+                // 5. Раскрываем слитное написание переменных (xy -> x*y)
+                str = str.replace(/x\s*y/g, 'x*y').replace(/y\s*x/g, 'y*x');
+
+                // 6. Раскрываем умножение числа на функцию (2sin -> 2*sin)
+                str = str.replace(/(\d)\s*(sin|cos|tan|cot|exp|ln|sqrt|\()/g, '$1*$2');
+
+                // 7. Раскрываем умножение переменной на функцию (xsin -> x*sin)
+                str = str.replace(/([xy])\s*(sin|cos|tan|cot|exp|ln|sqrt|\()/g, '$1*$2');
+
+                // 8. Раскрываем скобки, стоящие вплотную (x(x+1) -> x*(x+1) или (x+1)(y) -> (x+1)*(y))
+                str = str.replace(/\)\s*\(/g, ')*(').replace(/([xy\d])\s*\(/g, '$1*(').replace(/\)\s*([xy\d])/g, ')*$1');
+
+                const isDiffForm = str.includes('dx') || str.includes('dy');
+                const compiled = math.parse(str).compile();
+
+                // Проверочный запуск
+                compiled.evaluate({x: 1, y: 1, dx: 1, dy: 1, yp: 1});
+
+                // Генератор векторного поля
+                getVectorFunc = function(x, y) {
+                    try {
+                        if (isDiffForm) {
+                            // Для формы P(x,y)dx + Q(x,y)dy = 0
+                            // Вычленяем коэффициенты P и Q алгебраически
+                            let base = compiled.evaluate({x, y, dx: 0, dy: 0, yp: 0});
+                            let P = compiled.evaluate({x, y, dx: 1, dy: 0, yp: 0}) - base;
+                            let Q = compiled.evaluate({x, y, dx: 0, dy: 1, yp: 0}) - base;
+                            
+                            // P dx + Q dy = 0 => dx = Q, dy = -P
+                            return { vx: Q, vy: -P };
+                        } else {
+                            // Для формы A(x,y)y' + B(x,y) = 0
+                            let B = compiled.evaluate({x, y, dx: 0, dy: 0, yp: 0});
+                            let A = compiled.evaluate({x, y, dx: 0, dy: 0, yp: 1}) - B;
+                            
+                            // y' = dy/dx = -B/A => dx = A, dy = -B
+                            return { vx: A, vy: -B };
+                        }
+                    } catch (e) {
+                        return { vx: 0, vy: 0 };
+                    }
+                };
+
+                errorMsg.style.display = 'none';
+                drawVectorField();
+            } catch (err) {
+                errorMsg.style.display = 'block';
+                console.error("Ошибка парсинга:", err);
+            }
+        }
+
+        function getNormalizedVector(x, y) {
+            if (!getVectorFunc) return {dx: 0, dy: 0};
+            let v = getVectorFunc(x, y);
+            let len = Math.sqrt(v.vx*v.vx + v.vy*v.vy);
+            if (len < 1e-8 || !isFinite(len)) return {dx: 0, dy: 0};
+            return { dx: v.vx / len, dy: v.vy / len };
+        }
+
+        // Преобразования экран <-> математика
+        function toMathX(px) { return (px - originX) / scale; }
+        function toMathY(py) { return -(py - originY) / scale; }
+        function toScreenX(x) { return x * scale + originX; }
+        function toScreenY(y) { return -y * scale + originY; }
+
+        function drawVectorField() {
+            ctx.clearRect(0, 0, width, height);
+            
+            // Отрисовка сетки
+            ctx.strokeStyle = 'rgba(255,255,255,0.05)';
+            ctx.lineWidth = 1;
+            for(let i = 0; i < width; i += scale) {
+                ctx.beginPath(); ctx.moveTo(i, 0); ctx.lineTo(i, height); ctx.stroke();
+            }
+            for(let i = 0; i < height; i += scale) {
+                ctx.beginPath(); ctx.moveTo(0, i); ctx.lineTo(width, i); ctx.stroke();
+            }
+            
+            // Отрисовка осей
+            ctx.strokeStyle = 'rgba(255,255,255,0.2)';
+            ctx.beginPath();
+            ctx.moveTo(0, originY); ctx.lineTo(width, originY);
+            ctx.moveTo(originX, 0); ctx.lineTo(originX, height);
+            ctx.stroke();
+
+            // Векторное поле (штрихи изоклин)
+            ctx.strokeStyle = 'rgba(0, 255, 204, 0.4)';
+            ctx.lineWidth = 1.5;
+            const length = 12;
+
+            for (let px = 25; px < width; px += 25) {
+                for (let py = 25; py < height; py += 25) {
+                    let x = toMathX(px);
+                    let y = toMathY(py);
+                    let v = getNormalizedVector(x, y);
+                    
+                    if (v.dx === 0 && v.dy === 0) continue;
+                    
+                    let angle = Math.atan2(v.dy, v.dx);
+                    
+                    ctx.beginPath();
+                    ctx.moveTo(px - Math.cos(angle)*length/2, py + Math.sin(angle)*length/2);
+                    ctx.lineTo(px + Math.cos(angle)*length/2, py - Math.sin(angle)*length/2);
+                    ctx.stroke();
+                }
+            }
+        }
+
+        // Классический метод Рунге-Кутты 4-го порядка
+        function rk4Step(x, y, h) {
+            let v1 = getNormalizedVector(x, y);
+            let k1x = h * v1.dx; let k1y = h * v1.dy;
+            
+            let v2 = getNormalizedVector(x + k1x/2, y + k1y/2);
+            let k2x = h * v2.dx; let k2y = h * v2.dy;
+            
+            let v3 = getNormalizedVector(x + k2x/2, y + k2y/2);
+            let k3x = h * v3.dx; let k3y = h * v3.dy;
+            
+            let v4 = getNormalizedVector(x + k3x, y + k3y);
+            let k4x = h * v4.dx; let k4y = h * v4.dy;
+            
+            return {
+                x: x + (k1x + 2*k2x + 2*k3x + k4x) / 6,
+                y: y + (k1y + 2*k2y + 2*k3y + k4y) / 6
+            };
+        }
+
+        function drawTrajectory(startX, startY) {
+            if (!getVectorFunc) return;
+            ctx.strokeStyle = '#ff3366';
+            ctx.lineWidth = 2.5;
+            
+            const h = 0.05; 
+            const steps = 600; 
+            
+            // Движение вперед по параметру
+            ctx.beginPath();
+            ctx.moveTo(toScreenX(startX), toScreenY(startY));
+            let curr = {x: startX, y: startY};
+            for (let i = 0; i < steps; i++) {
+                curr = rk4Step(curr.x, curr.y, h);
+                if (Math.abs(curr.x) > 100 || Math.abs(curr.y) > 100) break; 
+                ctx.lineTo(toScreenX(curr.x), toScreenY(curr.y));
+            }
+            ctx.stroke();
+
+            // Движение назад по параметру
+            ctx.beginPath();
+            ctx.moveTo(toScreenX(startX), toScreenY(startY));
+            curr = {x: startX, y: startY};
+            for (let i = 0; i < steps; i++) {
+                curr = rk4Step(curr.x, curr.y, -h);
+                if (Math.abs(curr.x) > 100 || Math.abs(curr.y) > 100) break;
+                ctx.lineTo(toScreenX(curr.x), toScreenY(curr.y));
+            }
+            ctx.stroke();
+            
+            // Отмечаем точку клика (начальное условие задачи Коши)
+            ctx.fillStyle = '#ffcc00';
+            ctx.beginPath();
+            ctx.arc(toScreenX(startX), toScreenY(startY), 5, 0, Math.PI * 2);
+            ctx.fill();
+        }
+
+        // Обработчики событий
+        canvas.addEventListener('mousedown', function(e) {
+            const rect = canvas.getBoundingClientRect();
+            const px = e.clientX - rect.left;
+            const py = e.clientY - rect.top;
+            drawTrajectory(toMathX(px), toMathY(py));
+        });
+
+        updateBtn.addEventListener('click', compileEquation);
+        inputEq.addEventListener('keypress', e => { 
+            if (e.key === 'Enter') compileEquation(); 
+        });
+
+        // Первичная компиляция при загрузке
+        compileEquation();
+    </script>
+</body>
+</html>
